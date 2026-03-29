@@ -1,99 +1,86 @@
-from ultralytics import YOLO
 import cv2
 import numpy as np
-import winsound
+import pygame
+from ultralytics import YOLO
 
 # Load YOLO model
 model = YOLO("yolov8n.pt")
 
-# Open video
-cap = cv2.VideoCapture("assets/platform_video.mp4")
+# Initialize pygame sound
+pygame.mixer.init()
+warning_sound = pygame.mixer.Sound(r"C:\Users\Sakshi\Documents\RailwaySafety\assets\warning.mpeg")
 
-alert_played = False
+# Open video file
+video_path = r"C:\Users\Sakshi\Documents\RailwaySafety\assets\platform.mp4"
+cap = cv2.VideoCapture(video_path)
 
-while True:
+# ---------------------------------------------------------
+# DANGER ZONE POLYGON
+# ---------------------------------------------------------
+danger_zone = np.array([
+    (1, 488), (181, 443), (317, 409), (424, 382),
+    (461, 373), (475, 369), (471, 402), (398, 426),
+    (271, 470), (156, 510), (69, 539), (0, 565),
+    (2, 563), (2, 519)
+], dtype=np.int32)
+
+# Alert state flag
+alert_triggered = False
+
+while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
         break
 
-    # Copy frame for processing
     display_frame = frame.copy()
 
-    # ----------------------------
-    # Detect yellow line using color mask
-    # ----------------------------
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    results = model(frame, verbose=False)
+    train_present = False
 
-    lower_yellow = np.array([20, 100, 100])
-    upper_yellow = np.array([35, 255, 255])
-
-    mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
-
-    edges = cv2.Canny(mask, 50, 150)
-
-    lines = cv2.HoughLinesP(edges,1,np.pi/180,100,minLineLength=100,maxLineGap=10)
-
-    yellow_line_y = None
-
-    if lines is not None:
-        for line in lines:
-            x1,y1,x2,y2 = line[0]
-            cv2.line(display_frame,(x1,y1),(x2,y2),(0,255,255),3)
-            yellow_line_y = y1
-            break
-
-    # ----------------------------
-    # YOLO Object Detection
-    # ----------------------------
-    results = model(frame)
-
-    train_detected = False
-
+    # Detect train
     for r in results:
         for box in r.boxes:
+            if model.names[int(box.cls[0])] == "train":
+                train_present = True
 
-            cls = int(box.cls[0])
-            label = model.names[cls]
+    person_in_danger = False
 
-            x1,y1,x2,y2 = map(int, box.xyxy[0])
+    # Detect people
+    for r in results:
+        for box in r.boxes:
+            cls_id = int(box.cls[0])
+            if model.names[cls_id] == "person":
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-            # Detect train
-            if label == "train":
-                train_detected = True
-                cv2.rectangle(display_frame,(x1,y1),(x2,y2),(255,0,0),2)
-                cv2.putText(display_frame,"Train",(x1,y1-10),
-                            cv2.FONT_HERSHEY_SIMPLEX,0.7,(255,0,0),2)
+                if (x2 - x1) * (y2 - y1) < 5000:
+                    continue
 
-            # Detect person
-            if label == "person":
+                box_color = (0, 255, 0)
 
-                cv2.rectangle(display_frame,(x1,y1),(x2,y2),(0,255,0),2)
-                cv2.putText(display_frame,"Person",(x1,y1-10),
-                            cv2.FONT_HERSHEY_SIMPLEX,0.7,(0,255,0),2)
+                if not train_present:
+                    feet_point = (int((x1 + x2) / 2), y2)
 
-                if yellow_line_y is not None:
+                    if cv2.pointPolygonTest(danger_zone, feet_point, False) >= 0:
+                        box_color = (0, 0, 255)
+                        cv2.putText(display_frame, "WARNING: CROSSING", (x1, y1 - 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                        person_in_danger = True
 
-                    # Check if crossing yellow line
-                    if y2 > yellow_line_y and not train_detected:
+                cv2.rectangle(display_frame, (x1, y1), (x2, y2), box_color, 2)
 
-                        cv2.putText(display_frame,
-                                    "WARNING: DO NOT CROSS YELLOW LINE",
-                                    (50,50),
-                                    cv2.FONT_HERSHEY_SIMPLEX,
-                                    1,
-                                    (0,0,255),
-                                    3)
+    # ---------------------------------------------------------
+    # ALERT LOGIC (play once per entry)
+    # ---------------------------------------------------------
+    if person_in_danger and not alert_triggered:
+        warning_sound.play()
+        alert_triggered = True
+    elif not person_in_danger:
+        alert_triggered = False  # reset when no one is in danger zone
 
-                        if not alert_played:
-                            winsound.Beep(1500,700)
-                            alert_played = True
+    cv2.imshow("Railway Platform Monitor", display_frame)
 
-                    else:
-                        alert_played = False
-
-    cv2.imshow("Railway Platform Safety System", display_frame)
-
-    if cv2.waitKey(1) == 27:
+    key = cv2.waitKey(1)
+    if key == ord('q') or key == 27:
         break
 
 cap.release()
