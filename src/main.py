@@ -11,7 +11,7 @@ pygame.mixer.init()
 warning_sound = pygame.mixer.Sound(r"C:\Users\Sakshi\Documents\RailwaySafety\assets\warning.mpeg")
 
 # Open video file
-video_path = r"C:\Users\Sakshi\Documents\RailwaySafety\assets\platform.mp4"
+video_path = r"C:\Users\Sakshi\Documents\RailwaySafety\assets\platform(2).mp4"
 cap = cv2.VideoCapture(video_path)
 
 # ---------------------------------------------------------
